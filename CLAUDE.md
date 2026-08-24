@@ -40,6 +40,17 @@ Optional reference repos (read-only, for inspecting upstream workload roles):
 | [core_workloads](https://github.com/rhpds/core_workloads) | Reusable RHDP cluster-level workload roles |
 | [namespaced_workloads](https://github.com/rhpds/namespaced_workloads) | Reusable RHDP tenant-level workload roles |
 
+## Skills & Agent Automation
+
+This workspace includes interoperable skills (`.claude/skills/`) and subagent specs (`agents/`) for both Claude Code and Hermes Agent:
+
+- **`.claude/skills/release-dev-days/SKILL.md`** — Cut production releases, tag repos, update `prod.yaml`, and submit AgnosticV PRs.
+- **`.claude/skills/dev-days-triage/SKILL.md`** — Fetch open issues across roadshow repos, inspect code, draft fixes, and open PRs.
+- **`.claude/skills/rhdp-lab-validation/SKILL.md`** — Validate provisioned OpenShift Dev Days clusters ordered from RHDP.
+- **`.claude/skills/cluster-test-push/SKILL.md`** — Push local repo changes to a live cluster's GitLab for rapid testing.
+- **`agents/dev-agent.md`** — Developer subagent for code fixes and feature implementation.
+- **`agents/order-test-agent.md`** — Lab validation subagent for cluster health verification (`scripts/validate_dev_days_cluster.py`).
+
 ## AgnosticV Configuration
 
 The primary config file is `agnosticv/openshift_cnv/ocp-dev-days-rdshw-combined/common.yaml`.
@@ -60,7 +71,35 @@ verifying the dev environment, identifying changed repos, tagging with
 release notes via `gh release create`, updating `prod.yaml`, and opening
 an AgnosticV PR.
 
-See `skills/release-dev-days/SKILL.md` for the full checklist.
+See `.claude/skills/release-dev-days/SKILL.md` for the full checklist.
+
+## Automation Preferences
+
+- **Browser Automation**: Use Playwright over chrome-devtools MCP for web automation and validation tasks.
+
+## RHDH Per-User Entity Pattern (RBAC)
+
+When RHDH RBAC uses `IS_ENTITY_OWNER` to isolate per-user Components, any
+shared entity (API, Resource) that has relations to multiple users' Components
+will trigger "entities that couldn't be found" warnings — each user can only
+see their own Component but the shared entity references all of them.
+
+**Fix:** Create per-user entities by embedding them in `catalog-info.yaml.template`
+as additional YAML documents (separated by `---`). The tenant bootstrap job's
+`sed`-based template substitution handles multi-document YAML transparently.
+
+- Use `metadata.name: <entity>-{{user_guid}}` for unique identity
+- Keep `metadata.title` identical across users (e.g. "Parasol Insurance API") —
+  each user only sees their own, so the display name stays clean
+- Set `owner: user:default/{{user_guid}}` so RBAC grants access
+- Update the Component's `providesApis` / `consumesApis` to reference the
+  per-user entity name
+- Remove or stop importing the shared entity from `parasol-catalog-entities`
+  if it's fully replaced
+
+The shared `parasol-catalog-entities` repo (`system.yaml`, `resources.yaml`)
+still provides entities that are intentionally visible to all users (System,
+Resources). Only replace shared entities that cause RBAC cross-user warnings.
 
 ## Key Conventions
 

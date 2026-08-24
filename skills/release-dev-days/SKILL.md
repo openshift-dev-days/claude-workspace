@@ -36,12 +36,13 @@ control which version of each repo is deployed to production:
 
 | Variable | Controls | Example |
 |---|---|---|
-| `ocp4_workload_dev_days_rdshw_gitops_repo_tag` | Gitops cluster charts | `cluster-v1.1.0` |
+| `ocp4_workload_dev_days_rdshw_gitops_repo_tag` | Gitops cluster charts | `cluster-v1.2.0` |
 | `ocp4_workload_gitops_bootstrap_repo_revision` | Gitops tenant charts | `tenant-v1.1.0` |
 | `automation_tag` | Automation collection | `ocp-dev-days-1.1.0` |
+| `ocp4_workload_showroom_content_git_repo_ref` | Showroom content | `ocp-dev-days-rdshw-1.0.1` |
 
-Showroom uses `{{ tag }}` (resolves to `main`) in the combined common.yaml
-and does not require tagging unless you want to pin a specific version.
+Showroom's `common.yaml` defaults to `{{ tag }}` (resolves to `main`). The
+`prod.yaml` override pins it to a specific release tag.
 
 ---
 
@@ -84,27 +85,33 @@ before proceeding. Stale local state leads to incorrect change detection.
 
 ### Step 3: Identify Changed Repos
 
-For each repo, compare the last release tag to current HEAD. Only repos
-with meaningful changes need merging and tagging.
+For each repo, compare the last release tag to current HEAD on both `main`
+and `dev` (if it exists). Some repos use a `dev` branch for active work,
+others work directly on `main` — check both to avoid missing changes.
 
-**Gitops** (compare dev branch to last cluster/tenant tags):
+If `dev` is ahead of `main`, confirm with the user whether a merge PR
+(`dev` → `main`) is needed before tagging.
+
+**Gitops:**
 ```bash
 cd ocp-dev-days-rdshw-gitops
 
-# Check cluster-level changes
+# Check cluster-level changes (compare against both main and dev)
+git log <last-cluster-tag>..origin/main -- cluster/
 git log <last-cluster-tag>..origin/dev -- cluster/
 
 # Check tenant-level changes
+git log <last-tenant-tag>..origin/main -- tenant/
 git log <last-tenant-tag>..origin/dev -- tenant/
 ```
 
-**Automation** (compare to last automation tag):
+**Automation:**
 ```bash
 cd ocp-dev-days-rdshw-automation
 git log <last-automation-tag>..origin/main
 ```
 
-**Showroom** (compare to last release or main):
+**Showroom:**
 ```bash
 cd ocp-dev-days-rdshw-showroom
 git log <last-showroom-tag>..origin/main
@@ -112,14 +119,15 @@ git log <last-showroom-tag>..origin/main
 
 Record which repos have changes — only those need the remaining steps.
 
-### Step 4: Merge (Gitops Only)
+### Step 4: Merge Dev Branches
 
-The gitops repo uses a `dev` branch. Automation and showroom work directly
-on `main`, so they skip this step.
+For any repo where `dev` is ahead of `main` (identified in Step 3):
 
-- [ ] Open a PR to merge `dev` → `main` in ocp-dev-days-rdshw-gitops
+- [ ] Open a PR to merge `dev` → `main`
 - [ ] Review the diff — this is everything going to production
 - [ ] Merge the PR
+
+Skip this step for repos that work directly on `main`.
 
 ### Step 5: Tag Changed Repos
 
@@ -171,6 +179,9 @@ ocp4_workload_dev_days_rdshw_gitops_repo_tag: cluster-vX.Y.Z
 
 # If gitops tenant/ changed:
 ocp4_workload_gitops_bootstrap_repo_revision: tenant-vX.Y.Z
+
+# If showroom changed:
+ocp4_workload_showroom_content_git_repo_ref: vX.Y.Z
 ```
 
 **Do NOT modify `__meta__.deployer.scm_ref`** — that references the

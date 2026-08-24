@@ -1,0 +1,11 @@
+{
+  "name": "ocp-dev-days",
+  "version": "1.0.0",
+  "description": "Skills for OpenShift Dev Days Roadshow development and operations",
+  "skills": [
+    "release-dev-days",
+    "dev-days-triage",
+    "rhdp-lab-validation",
+    "cluster-test-push"
+  ]
+}
