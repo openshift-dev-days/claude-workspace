@@ -24,20 +24,36 @@ tenant provisioning in a single catalog item.
 
 ## Repositories
 
+### Workshop Content & Infrastructure
+
 Clone these as sibling directories alongside this CLAUDE.md:
 
-| Repository | Purpose | Branch model |
-|---|---|---|
-| [ocp-dev-days-rdshw-gitops](https://github.com/rhpds/ocp-dev-days-rdshw-gitops) | Helm charts for cluster (`cluster/`) and tenant (`tenant/`) bootstrapping | `dev` → `main` |
-| [ocp-dev-days-rdshw-automation](https://github.com/rhpds/ocp-dev-days-rdshw-automation) | Ansible collection with cluster bootstrap and custom roles | `main` |
-| [ocp-dev-days-rdshw-showroom](https://github.com/rhpds/ocp-dev-days-rdshw-showroom) | Antora-based workshop modules and lab guide | `main` |
-| [agnosticv](https://github.com/rhpds/agnosticv) | RHDP catalog config — defines workloads, variables, and prod/dev tags | `master` |
+| Repository | Purpose | Branch model | Tagging |
+|---|---|---|---|
+| [ocp-dev-days-rdshw-gitops](https://github.com/rhpds/ocp-dev-days-rdshw-gitops) | Helm charts for cluster (`cluster/`) and tenant (`tenant/`) bootstrapping | `dev` → `main` | Independent: `cluster-vX.Y.Z`, `tenant-vX.Y.Z` |
+| [ocp-dev-days-rdshw-automation](https://github.com/rhpds/ocp-dev-days-rdshw-automation) | Ansible collection with cluster bootstrap and custom roles | `main` | `ocp-dev-days-X.Y.Z` |
+| [ocp-dev-days-rdshw-showroom](https://github.com/rhpds/ocp-dev-days-rdshw-showroom) | Antora-based workshop modules and lab guide | `main` | `ocp-dev-days-rdshw-X.Y.Z` |
+| [agnosticv](https://github.com/rhpds/agnosticv) | RHDP catalog config — defines workloads, variables, and environment overrides | `master` | Not tagged (catalog configs reference our other repos' tags) |
 
-Optional reference repos (read-only, for inspecting upstream workload roles):
+### Application Repos (openshift-dev-days org)
+
+Workshop application code and RHDH catalog entities:
+
+| Repository | Purpose | Visibility |
+|---|---|---|
+| [parasol-insurance](https://github.com/openshift-dev-days/parasol-insurance) | Per-user Quarkus microservices app with catalog-info.yaml | Forked per attendee |
+| [parasol-catalog-entities](https://github.com/openshift-dev-days/parasol-catalog-entities) | Shared RHDH System and Resource entities | Single shared repo |
+| [module3-dev-workspace](https://github.com/openshift-dev-days/module3-dev-workspace) | Module 3 Dev Spaces workspace template | Shared reference |
+| [rhdh-templates](https://github.com/openshift-dev-days/rhdh-templates) | RHDH software templates for Module 4 | Shared reference |
+| [parasol-insurance-manifests](https://github.com/openshift-dev-days/parasol-insurance-manifests) | GitOps manifests for parasol-insurance deployments | Per-user repos |
+
+### Reference Repos (RHDP upstream workloads)
+
+Read-only, for inspecting reusable workload roles:
 
 | Repository | Purpose |
 |---|---|
-| [core_workloads](https://github.com/rhpds/core_workloads) | Reusable RHDP cluster-level workload roles |
+| [core_workloads](https://github.com/rhpds/core_workloads) | Reusable RHDP cluster-level workload roles (includes multi_tenant_loop bridge) |
 | [namespaced_workloads](https://github.com/rhpds/namespaced_workloads) | Reusable RHDP tenant-level workload roles |
 
 ## Skills & Agent Automation
@@ -53,16 +69,92 @@ This workspace includes interoperable skills (`.claude/skills/`) and subagent sp
 
 ## AgnosticV Configuration
 
-The primary config file is `agnosticv/openshift_cnv/ocp-dev-days-rdshw-combined/common.yaml`.
-It defines:
+AgnosticV uses a **base + environment override** pattern for the catalog item at:
+```
+agnosticv/openshift_cnv/ocp-dev-days-rdshw-combined/
+├── common.yaml    # Base configuration (workloads, variables, collections)
+├── dev.yaml       # Development environment overrides
+└── prod.yaml      # Production environment overrides (pinned release tags)
+```
 
-- `workloads` — cluster-level roles run once (auth, gitops, litellm, bootstrap, then the multi-tenant bridge)
-- `tenant_workloads` — per-user roles run by the bridge (keycloak user, gitops appproject, bootstrap, showroom)
-- `tenant_workload_vars` — per-user variable overrides evaluated per iteration
-- `requirements_content.collections` — Ansible collections to install (pinned by tag)
+### common.yaml (Base Configuration)
 
-Production tags are set in `prod.yaml`. Dev uses `main` for everything via
-`{{ tag }}` in `common.yaml`.
+Defines the workshop structure that applies to **all environments**:
+
+- **`tag: main`** — Default variable used throughout. Dev uses as-is, prod overrides.
+- **`automation_tag: "{{ tag }}"`** — Resolves to `main` in dev, overridden in prod.
+- **`workloads`** — Cluster-level roles run **once** per provision:
+  - Keycloak SSO realm setup
+  - OpenShift GitOps operator + ArgoCD instance
+  - LiteLLM virtual key provisioning (shared cluster-wide)
+  - Cluster bootstrap (app-of-apps from gitops repo)
+  - Multi-tenant bridge (loops through tenant workloads per user)
+- **`tenant_workloads`** — Per-user roles run **num_users times** by the bridge:
+  - Keycloak user creation
+  - ArgoCD AppProject per user
+  - Tenant bootstrap (GitOps Application from gitops repo tenant charts)
+  - Showroom lab UI instance
+- **`tenant_workload_vars`** — Per-user variable overrides evaluated each iteration
+- **`requirements_content.collections`** — Ansible collections to install, pinned by `{{ tag }}`
+
+### dev.yaml (Development Overrides)
+
+Development environment uses **`dev` branches** and allows failures for rapid iteration:
+
+```yaml
+purpose: development
+
+__meta__:
+  deployer:
+    scm_ref: main  # agnosticd deployer branch (not our repos)
+
+# Use dev branch for gitops
+ocp4_workload_dev_days_rdshw_gitops_repo_tag: dev
+ocp4_workload_gitops_bootstrap_repo_revision: dev
+
+# Provision only 1 user for fast testing
+num_users: 1
+
+# Ignore ArgoCD sync failures for rapid iteration
+ocp4_workload_dev_days_rdshw_wait_for_apps_ignore_errors: true
+```
+
+### prod.yaml (Production Overrides)
+
+Production environment uses **pinned release tags** for stability:
+
+```yaml
+# Automation collection tag (references ocp-dev-days-rdshw-automation release)
+automation_tag: "ocp-dev-days-1.1.0"
+
+# Gitops cluster and tenant charts — versioned independently
+ocp4_workload_dev_days_rdshw_gitops_repo_tag: cluster-v1.3.1
+ocp4_workload_gitops_bootstrap_repo_revision: tenant-v1.2.0
+
+# Showroom content pinned to release tag
+ocp4_workload_showroom_content_git_repo_ref: ocp-dev-days-rdshw-1.0.1
+
+__meta__:
+  deployer:
+    scm_ref: "ocp-dev-days-1.0.0"  # agnosticd deployer version (not our repos)
+```
+
+> [!NOTE]
+> Tags shown above are **illustrative examples** from a point in time. Always check
+> `agnosticv/openshift_cnv/ocp-dev-days-rdshw-combined/prod.yaml` for current production
+> tags and `dev.yaml` for development configuration.
+
+### How Overrides Work
+
+When RHDP processes an order:
+
+1. **Loads `common.yaml`** — establishes base structure and `{{ tag }}` variable
+2. **Merges environment file** — `dev.yaml` or `prod.yaml` based on catalog item environment
+3. **Variable resolution** — `{{ tag }}` resolves to:
+   - Dev: `main` (from common.yaml, no override)
+   - Prod: Still `main` in common.yaml, but **specific variables** are overridden with release tags
+4. **Collections install** — uses resolved `{{ tag }}` or explicit version strings
+5. **Workloads execute** — with merged configuration
 
 ## Release Process
 
@@ -103,9 +195,32 @@ Resources). Only replace shared entities that cause RBAC cross-user warnings.
 
 ## Key Conventions
 
-- **Tag format (gitops):** `cluster-vX.Y.Z` and `tenant-vX.Y.Z` — versioned independently
-- **Tag format (automation):** `ocp-dev-days-X.Y.Z`
-- **Showroom:** uses `main` in prod (not tagged)
-- **`__meta__.deployer.scm_ref`** in prod.yaml references the agnosticd deployer, not our workshop repos — do not change it during releases
-- **`common_password`:** generated once per provision, shared across all roles and users
-- **Keycloak realm:** `sso`, user group: `users`
+### Tagging & Versioning
+
+- **Gitops repo:** `cluster-vX.Y.Z` and `tenant-vX.Y.Z` — versioned independently
+- **Automation repo:** `ocp-dev-days-X.Y.Z`
+- **Showroom repo:** `ocp-dev-days-rdshw-X.Y.Z`
+- **AgnosticV:** Not tagged — catalog configs reference our repos' tags via variable overrides
+
+### Important Variables
+
+- **`tag`:** Base variable in common.yaml (default: `main`). Controls collection versions via `{{ tag }}`.
+- **`automation_tag`:** References automation collection release. Dev: `main`, Prod: pinned (e.g., `ocp-dev-days-1.1.0`)
+- **`__meta__.deployer.scm_ref`:** References the **agnosticd deployer**, not our workshop repos — **never change during releases**
+- **`common_password`:** Generated once per provision, shared across all roles and users
+
+### Keycloak
+
+- **Realm:** `sso`
+- **User group:** `users`
+- **User pattern:** `user1`, `user2`, ... `user{num_users}`
+
+### RHDH Per-User Entities
+
+For RBAC with `IS_ENTITY_OWNER` policy, create per-user entities in `catalog-info.yaml.template`:
+
+- Use `metadata.name: <entity>-{{user_guid}}` for unique identity
+- Keep `metadata.title` identical across users (display name)
+- Set `owner: user:default/{{user_guid}}` for RBAC
+- Embed as additional YAML documents separated by `---`
+- Reference in Component's `providesApis`/`consumesApis` by per-user name
